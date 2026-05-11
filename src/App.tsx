@@ -892,7 +892,7 @@ export default function App() {
   }, []);
 
   const menuItems: MenuItem[] = [
-    { id: '1', name: 'Signature Latte', price: 45000, description: 'Double shot espresso with creamy textured milk and a hint of vanilla.', category: 'coffee', image: '/src/assets/images/regenerated_image_1778467258301.png' },
+    { id: '1', name: 'Signature Latte', price: 45000, description: 'Double shot espresso with creamy textured milk and a hint of vanilla.', category: 'coffee', image: 'https://www.aeki-aice.org/wp-content/uploads/2025/07/Coffee-Signature-Menu.webp' },
     { id: '2', name: 'Almond Croissant', price: 38000, description: 'Buttery, flaky pastry filled with house-made almond frangipane.', category: 'pastry', image: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?q=80&w=800&auto=format&fit=crop' },
     { id: '3', name: 'Matcha Zen', price: 42000, description: 'Ceremonial grade Uji matcha with steamed oat milk.', category: 'tea', image: 'https://images.unsplash.com/photo-1515823064-d6e0c04616a7?q=80&w=800&auto=format&fit=crop' },
     { id: '4', name: 'Cold Brew Citrus', price: 48000, description: '18-hour cold steeped coffee with fresh orange zest.', category: 'coffee', image: 'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?q=80&w=800&auto=format&fit=crop' },
