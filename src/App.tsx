@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Coffee, Calendar, MapPin, Phone, Instagram, Clock, ChevronRight, CheckCircle2, AlertCircle, Menu as MenuIcon, X, User, LayoutDashboard, LogOut, Check, Trash2, Table as TableIcon } from 'lucide-react';
 import { db, auth, loginWithGoogle, logout, handleFirestoreError, OperationType } from './lib/firebase';
-import { collection, addDoc, serverTimestamp, getDocs, query, orderBy, updateDoc, doc, deleteDoc, where } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, getDocs, query, orderBy, updateDoc, doc, deleteDoc, where, setDoc } from 'firebase/firestore';
 import { MenuItem, Booking } from './types';
 
 const ADMIN_EMAIL = 'orioon700@gmail.com';
@@ -16,10 +16,59 @@ const addHours = (time: string, hours: number) => {
   return `${String(Math.min(newH, 23)).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
 };
 
-const BookingDetail = ({ booking, onBack }: { booking: Booking; onBack: () => void }) => {
+const sendBookingEmail = (booking: any, type: 'new' | 'confirmed' | 'cancelled') => {
+  const messages = {
+    new: `Permintaan reservasi baru dari ${booking.name} untuk tanggal ${booking.date} pukul ${booking.time}.`,
+    confirmed: `Kabar gembira! Reservasi Anda di Aroma Bumi untuk tanggal ${booking.date} telah DIKONFIRMASI. Silakan masuk ke aplikasi untuk memesan menu terlebih dahulu.`,
+    cancelled: `Mohon maaf, reservasi Anda di Aroma Bumi untuk tanggal ${booking.date} tidak dapat kami penuhi saat ini.`
+  };
+  
+  console.log(`%c [MOCK EMAIL SENT TO ${booking.email}] %c`, 'background: #2C1B10; color: #fff; padding: 2px 5px; border-radius: 2px;', '', messages[type]);
+};
+
+const BookingDetail = ({ booking: initialBooking, onBack }: { booking: Booking; onBack: () => void }) => {
+  const [booking, setBooking] = useState(initialBooking);
+  const [isPreOrdering, setIsPreOrdering] = useState(false);
+  const [cart, setCart] = useState<{itemId: string, name: string, quantity: number, price: number}[]>(booking.preOrderItems || []);
+
+  const menuItems: MenuItem[] = [
+    { id: '1', name: 'Signature Latte', price: 45000, description: 'Double shot espresso with creamy textured milk and a hint of vanilla.', category: 'coffee', image: '/src/assets/images/regenerated_image_1778467258301.png' },
+    { id: '2', name: 'Almond Croissant', price: 38000, description: 'Buttery, flaky pastry filled with house-made almond frangipane.', category: 'pastry', image: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?q=80&w=800&auto=format&fit=crop' },
+    { id: '3', name: 'Matcha Zen', price: 42000, description: 'Ceremonial grade Uji matcha with steamed oat milk.', category: 'tea', image: 'https://images.unsplash.com/photo-1515823064-d6e0c04616a7?q=80&w=800&auto=format&fit=crop' },
+    { id: '4', name: 'Cold Brew Citrus', price: 48000, description: '18-hour cold steeped coffee with fresh orange zest.', category: 'coffee', image: 'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?q=80&w=800&auto=format&fit=crop' },
+  ];
+
+  const addToCart = (item: MenuItem) => {
+    setCart(prev => {
+      const existing = prev.find(i => i.itemId === item.id);
+      if (existing) {
+        return prev.map(i => i.itemId === item.id ? { ...i, quantity: i.quantity + 1 } : i);
+      }
+      return [...prev, { itemId: item.id, name: item.name, quantity: 1, price: item.price }];
+    });
+  };
+
+  const removeFromCart = (itemId: string) => {
+    setCart(prev => prev.filter(i => i.itemId !== itemId));
+  };
+
+  const savePreOrder = async () => {
+    if (!booking.id) return;
+    try {
+      const ref = doc(db, 'bookings', booking.id);
+      await updateDoc(ref, { preOrderItems: cart });
+      setBooking({ ...booking, preOrderItems: cart });
+      setIsPreOrdering(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `bookings/${booking.id}`);
+    }
+  };
+
+  const totalPrice = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+
   return (
     <div className="min-h-screen pt-32 pb-20 bg-natural-50">
-      <div className="max-w-4xl mx-auto px-6">
+      <div className="max-w-6xl mx-auto px-6">
         <button 
           onClick={onBack}
           className="text-[10px] uppercase font-bold text-natural-400 hover:text-natural-700 mb-8 flex items-center gap-1 tracking-widest transition-colors"
@@ -71,16 +120,88 @@ const BookingDetail = ({ booking, onBack }: { booking: Booking; onBack: () => vo
                 </div>
               </div>
 
-              <div className="mt-12 p-8 bg-natural-50 rounded-3xl border border-natural-100 flex flex-col md:flex-row items-center gap-6">
-                <div className="w-32 h-32 bg-white p-2 rounded-2xl border border-natural-200 flex items-center justify-center">
-                  <div className="w-full h-full bg-natural-900 rounded-lg flex items-center justify-center">
-                     <CheckCircle2 className="text-white w-12 h-12" />
+              {/* Preorder Section */}
+              <div className="mt-16 pt-16 border-t border-natural-100">
+                <div className="flex items-center justify-between mb-8">
+                  <h3 className="text-2xl font-serif font-bold text-natural-900">Pesanan Menu (Pre-order)</h3>
+                  {booking.status === 'confirmed' && !isPreOrdering && (
+                    <button 
+                      onClick={() => setIsPreOrdering(true)}
+                      className="px-6 py-2 bg-natural-900 text-white rounded-full text-[10px] font-bold uppercase tracking-widest hover:bg-natural-800 transition-all"
+                    >
+                      {cart.length > 0 ? 'Ubah Pesanan' : 'Tambah Menu'}
+                    </button>
+                  )}
+                </div>
+
+                {isPreOrdering ? (
+                  <div className="space-y-8">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {menuItems.map(item => (
+                        <div key={item.id} className="p-4 border border-natural-200 rounded-3xl flex items-center gap-4 hover:border-natural-400 transition-all">
+                          <img src={item.image} alt={item.name} className="w-12 h-12 object-cover rounded-xl" />
+                          <div className="flex-1">
+                            <h4 className="text-sm font-bold">{item.name}</h4>
+                            <p className="text-[10px] text-natural-400">Rp {item.price.toLocaleString()}</p>
+                          </div>
+                          <button onClick={() => addToCart(item)} className="p-2 bg-natural-100 rounded-full hover:bg-natural-700 hover:text-white transition-all">
+                            <Check className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="bg-natural-900 p-8 rounded-[32px] text-white">
+                      <h4 className="text-[10px] uppercase font-bold text-natural-400 tracking-[0.2em] mb-6">Ringkasan Pesanan</h4>
+                      {cart.length === 0 ? (
+                         <p className="text-white/40 italic text-sm">Keranjang masih kosong.</p>
+                      ) : (
+                        <div className="space-y-4 mb-8">
+                          {cart.map(item => (
+                            <div key={item.itemId} className="flex justify-between items-center text-sm">
+                               <div className="flex items-center gap-3">
+                                  <span className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center text-[10px]">{item.quantity}</span>
+                                  <span className="font-serif">{item.name}</span>
+                               </div>
+                               <div className="flex items-center gap-4">
+                                  <span className="font-mono text-white/60">Rp {(item.price * item.quantity).toLocaleString()}</span>
+                                  <button onClick={() => removeFromCart(item.itemId)} className="text-white/20 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>
+                               </div>
+                            </div>
+                          ))}
+                          <div className="pt-4 border-t border-white/10 flex justify-between items-center">
+                             <span className="text-xs font-bold uppercase tracking-widest text-natural-400">Total</span>
+                             <span className="text-2xl font-serif font-bold">Rp {totalPrice.toLocaleString()}</span>
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex gap-4">
+                        <button onClick={savePreOrder} className="flex-1 bg-white text-natural-900 py-3 rounded-full font-bold uppercase tracking-widest text-[10px] hover:bg-natural-100">Simpan</button>
+                        <button onClick={() => { setIsPreOrdering(false); setCart(booking.preOrderItems || []); }} className="px-8 py-3 border border-white/20 rounded-full font-bold uppercase tracking-widest text-[10px]">Batal</button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div className="text-center md:text-left flex-1">
-                  <h4 className="font-bold text-natural-900 mb-2">Check-in Digital</h4>
-                  <p className="text-xs text-natural-500 leading-relaxed italic">Tunjukkan halaman ini kepada staf kami saat Anda tiba di Aroma Bumi. Kami akan segera mengantar Anda ke Meja {booking.tableId}.</p>
-                </div>
+                ) : (
+                  <div className="space-y-4">
+                    {cart.length === 0 ? (
+                      <div className="p-10 border-2 border-dashed border-natural-100 rounded-3xl text-center">
+                        <p className="text-natural-400 italic text-sm">Belum ada menu yang dipesan.</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {cart.map(item => (
+                          <div key={item.itemId} className="p-4 bg-natural-50 border border-natural-100 rounded-3xl flex items-center gap-4">
+                            <span className="w-8 h-8 rounded-xl bg-natural-700 text-white flex items-center justify-center font-bold text-xs">{item.quantity}x</span>
+                            <div>
+                              <h4 className="text-sm font-bold text-natural-900">{item.name}</h4>
+                              <p className="text-[10px] text-natural-400 uppercase tracking-widest font-bold">Siap disajikan</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -95,6 +216,15 @@ const BookingDetail = ({ booking, onBack }: { booking: Booking; onBack: () => vo
                     />
                   </div>
                   <p className="mt-6 text-[10px] text-natural-400 text-center uppercase tracking-widest font-bold">Lantai 1 — Area {TABLES.find(t => t.id === booking.tableId)?.type}</p>
+                  
+                  <div className="mt-12 p-8 bg-white rounded-3xl border border-natural-200">
+                    <h4 className="font-bold text-natural-900 mb-2">Check-in</h4>
+                    <p className="text-xs text-natural-500 leading-relaxed italic mb-6">Tunjukkan ID ini kepada staf saat tiba.</p>
+                    <div className="w-full h-1 bg-natural-100 rounded-full mb-6" />
+                    <div className="text-center font-mono text-2xl font-bold tracking-widest text-natural-900">
+                      #RE-{booking.id?.slice(-8).toUpperCase()}
+                    </div>
+                  </div>
                </div>
             </div>
           </div>
@@ -122,13 +252,25 @@ const MyBookings = ({ onDetails }: { onDetails: (b: Booking) => void }) => {
         const data = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Booking));
         setBookings(data);
       } catch (error) {
-        handleFirestoreError(error, OperationType.LIST, 'bookings');
+        // If it's a permission error and we're not signed in, just ignore or log quietly
+        if (auth.currentUser) {
+          handleFirestoreError(error, OperationType.LIST, 'bookings');
+        }
       } finally {
         setLoading(false);
       }
     };
 
-    fetchMyBookings();
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        fetchMyBookings();
+      } else {
+        setBookings([]);
+        setLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   if (loading) return (
@@ -404,8 +546,15 @@ const TableLayout = ({ selectedTable, onSelect, guests, occupiedTables = [] }: {
 const AdminDashboard = () => {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'confirmed' | 'cancelled'>('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState<'visit_date' | 'created_at'>('visit_date');
 
   const fetchBookings = async () => {
+    if (!auth.currentUser || auth.currentUser.email !== ADMIN_EMAIL) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const q = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'));
@@ -420,13 +569,51 @@ const AdminDashboard = () => {
   };
 
   useEffect(() => {
-    fetchBookings();
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user && user.email === ADMIN_EMAIL) {
+        fetchBookings();
+      } else {
+        setLoading(false);
+      }
+    });
+    return () => unsubscribe();
   }, []);
+
+  const filteredBookings = bookings
+    .filter(b => {
+      const matchesStatus = filterStatus === 'all' || b.status === filterStatus;
+      const matchesSearch = b.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                           b.phone.includes(searchTerm) ||
+                           b.email.toLowerCase().includes(searchTerm.toLowerCase());
+      return matchesStatus && matchesSearch;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'visit_date') {
+        const dateA = `${a.date}T${a.time}`;
+        const dateB = `${b.date}T${b.time}`;
+        return dateA.localeCompare(dateB);
+      }
+      return 0; // Default order from Firestore
+    });
 
   const updateStatus = async (id: string, status: 'confirmed' | 'cancelled') => {
     try {
       const bookingRef = doc(db, 'bookings', id);
+      const publicRef = doc(db, 'public_bookings', id);
+      
+      const currentBooking = bookings.find(b => b.id === id);
+      
       await updateDoc(bookingRef, { status });
+      try {
+        await updateDoc(publicRef, { status });
+      } catch (e) {
+        console.warn('Could not update public_bookings:', e);
+      }
+      
+      if (currentBooking) {
+        sendBookingEmail(currentBooking, status);
+      }
+      
       setBookings(bookings.map(b => b.id === id ? { ...b, status } : b));
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `bookings/${id}`);
@@ -437,6 +624,11 @@ const AdminDashboard = () => {
     if (!window.confirm('Hapus reservasi ini?')) return;
     try {
       await deleteDoc(doc(db, 'bookings', id));
+      try {
+        await deleteDoc(doc(db, 'public_bookings', id));
+      } catch (e) {
+        console.warn('Could not delete from public_bookings:', e);
+      }
       setBookings(bookings.filter(b => b.id !== id));
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `bookings/${id}`);
@@ -454,7 +646,9 @@ const AdminDashboard = () => {
     total: bookings.length,
     pending: bookings.filter(b => b.status === 'pending').length,
     confirmed: bookings.filter(b => b.status === 'confirmed').length,
-    cancelled: bookings.filter(b => b.status === 'cancelled').length
+    revenue: bookings
+      .filter(b => b.status === 'confirmed')
+      .reduce((sum, b) => sum + (b.preOrderItems?.reduce((s, i) => s + (i.price * i.quantity), 0) || 0), 0)
   };
 
   return (
@@ -463,11 +657,11 @@ const AdminDashboard = () => {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 gap-6">
           <div>
             <h1 className="text-4xl md:text-5xl font-serif font-bold text-natural-900 mb-2">Panel Reservasi</h1>
-            <p className="text-natural-500 italic">Kelola semua pemesanan meja Aroma Bumi.</p>
+            <p className="text-natural-500 italic">Kelola semua pemesanan meja Aroma Bumi secara efisien.</p>
           </div>
           <button 
             onClick={fetchBookings}
-            className="text-[10px] uppercase font-bold text-natural-400 hover:text-natural-700 transition-colors flex items-center gap-2 tracking-[0.2em]"
+            className="px-6 py-2 bg-white border border-natural-200 rounded-full text-[10px] uppercase font-bold text-natural-400 hover:text-natural-900 transition-all flex items-center gap-2 tracking-[0.2em]"
           >
             Refresh Data
           </button>
@@ -476,7 +670,7 @@ const AdminDashboard = () => {
         {/* Stats Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
           <div className="bg-white p-6 rounded-[32px] border border-natural-200 shadow-sm">
-            <span className="text-[10px] uppercase font-bold text-natural-400 tracking-widest block mb-2">Total</span>
+            <span className="text-[10px] uppercase font-bold text-natural-400 tracking-widest block mb-2">Total Reservasi</span>
             <div className="flex items-end justify-between">
               <span className="text-3xl font-serif font-bold text-natural-900">{stats.total}</span>
               <Calendar className="w-5 h-5 text-natural-200" />
@@ -496,114 +690,171 @@ const AdminDashboard = () => {
               <CheckCircle2 className="w-5 h-5 text-green-100" />
             </div>
           </div>
-          <div className="bg-white p-6 rounded-[32px] border border-natural-200 shadow-sm">
-            <span className="text-[10px] uppercase font-bold text-red-500 tracking-widest block mb-2">Dibatalkan</span>
+          <div className="bg-white p-6 rounded-[32px] border border-natural-200 shadow-sm bg-natural-900 text-white">
+            <span className="text-[10px] uppercase font-bold text-white/50 tracking-widest block mb-2">Estimasi Pre-Order</span>
             <div className="flex items-end justify-between">
-              <span className="text-3xl font-serif font-bold text-natural-900">{stats.cancelled}</span>
-              <X className="w-5 h-5 text-red-100" />
+              <span className="text-xl font-serif font-bold">Rp {stats.revenue.toLocaleString()}</span>
+              <Coffee className="w-5 h-5 text-white/20" />
             </div>
           </div>
         </div>
 
-        <div className="grid gap-6">
-          {bookings.map((booking) => (
-            <motion.div 
-              key={booking.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-white border border-natural-200 rounded-[32px] p-6 md:p-10 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-8 shadow-sm hover:shadow-xl transition-all"
-            >
-              <div className="flex-1 space-y-6">
-                <div className="flex items-center gap-4">
-                  <span className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-[0.2em] ${
-                    booking.status === 'confirmed' ? 'bg-green-100 text-green-700' :
-                    booking.status === 'cancelled' ? 'bg-red-100 text-red-700' :
-                    'bg-yellow-100 text-yellow-700'
-                  }`}>
-                    {booking.status === 'pending' ? 'Menunggu' : booking.status === 'confirmed' ? 'Dikonfirmasi' : 'Dibatalkan'}
-                  </span>
-                  <span className="text-natural-300 font-mono text-[10px] uppercase tracking-tighter">ID: {booking.id?.slice(-8)}</span>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  <div>
-                    <h3 className="text-2xl font-serif font-bold text-natural-900 mb-2">{booking.name}</h3>
-                    <div className="flex flex-col gap-1">
-                      <p className="text-sm text-natural-500">{booking.email}</p>
-                      <p className="text-sm text-natural-500 font-bold">{booking.phone}</p>
-                    </div>
-                  </div>
+        {/* Filters & Search */}
+        <div className="bg-white p-4 rounded-[32px] border border-natural-200 shadow-sm mb-8 flex flex-col lg:flex-row gap-6 items-center">
+           <div className="flex-1 w-full relative">
+              <input 
+                type="text"
+                placeholder="Cari nama, email, atau telepon..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 bg-natural-50 rounded-2xl border-none text-sm focus:ring-2 focus:ring-natural-900 transition-all font-serif"
+              />
+              <User className="absolute left-4 top-3.5 w-4 h-4 text-natural-300" />
+           </div>
 
-                  <div className="bg-natural-50 p-6 rounded-3xl border border-natural-100">
-                    <div className="flex items-center gap-3 mb-3">
-                      <Calendar className="w-5 h-5 text-natural-700" />
-                      <span className="text-lg font-serif font-bold text-natural-900">{booking.date}</span>
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <div className="flex items-center gap-3">
-                        <Clock className="w-5 h-5 text-natural-400" />
-                        <span className="text-sm font-bold text-natural-700 uppercase tracking-widest">{booking.time} — {booking.endTime || addHours(booking.time, 5)} WIB</span>
-                      </div>
-                      <p className="text-[9px] uppercase font-bold text-natural-300 tracking-widest ml-8">Durasi 5 Jam</p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col justify-center">
-                    <div className="flex items-center gap-4 mb-2">
-                       <div className="w-10 h-10 bg-natural-900 text-white rounded-xl flex items-center justify-center font-serif font-bold">
-                          {booking.tableId}
-                       </div>
-                       <div>
-                          <p className="text-[10px] uppercase font-bold text-natural-400 tracking-widest">Meja Pilihan</p>
-                          <p className="text-sm font-bold text-natural-900">{booking.guests} Tamu</p>
-                       </div>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="pt-4 border-t border-natural-100 flex items-center gap-2 text-[10px] uppercase font-bold text-natural-300 tracking-[0.2em]">
-                   Dipesan pada {booking.createdAt ? new Date(booking.createdAt.toDate()).toLocaleString() : 'N/A'}
-                </div>
-              </div>
-
-              <div className="flex lg:flex-col items-center gap-3 w-full lg:w-auto border-t lg:border-t-0 lg:border-l border-natural-100 pt-6 lg:pt-0 lg:pl-10">
-                {booking.status === 'pending' ? (
-                  <>
-                    <button 
-                      onClick={() => updateStatus(booking.id!, 'confirmed')}
-                      className="flex-1 lg:w-full p-4 bg-natural-700 text-natural-50 rounded-2xl hover:bg-natural-800 shadow-lg shadow-natural-700/20 transition-all flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-widest"
-                    >
-                      <Check className="w-4 h-4" />
-                      Terima
-                    </button>
-                    <button 
-                      onClick={() => updateStatus(booking.id!, 'cancelled')}
-                      className="flex-1 lg:w-full p-4 border border-natural-200 text-natural-400 rounded-2xl hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-all flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-widest"
-                    >
-                      <X className="w-4 h-4" />
-                      Tolak
-                    </button>
-                  </>
-                ) : (
-                  <div className="flex-1 lg:w-full flex items-center justify-center py-4">
-                     <span className="text-[10px] uppercase font-bold text-natural-300 tracking-widest italic">Selesai</span>
-                  </div>
-                )}
-                <button 
-                  onClick={() => deleteBooking(booking.id!)}
-                  className="p-4 text-natural-200 hover:text-red-500 transition-colors"
-                  title="Hapus Permanen"
+           <div className="flex flex-wrap gap-2 justify-center">
+              {(['all', 'pending', 'confirmed', 'cancelled'] as const).map(s => (
+                <button
+                  key={s}
+                  onClick={() => setFilterStatus(s)}
+                  className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${
+                    filterStatus === s ? 'bg-natural-900 text-white shadow-lg shadow-natural-900/10' : 'bg-natural-50 text-natural-400 hover:bg-natural-100'
+                  }`}
                 >
-                  <Trash2 className="w-5 h-5" />
+                  {s === 'all' ? 'Semua' : s === 'pending' ? 'Menunggu' : s === 'confirmed' ? 'Diterima' : 'Batal'}
                 </button>
-              </div>
-            </motion.div>
-          ))}
-          
-          {bookings.length === 0 && (
-            <div className="py-20 text-center bg-white border border-natural-200 border-dashed rounded-3xl">
-              <p className="text-natural-400 italic">Belum ada reservasi masuk.</p>
+              ))}
+           </div>
+
+           <div className="h-8 w-px bg-natural-100 hidden lg:block" />
+
+           <button 
+              onClick={() => setSortBy(sortBy === 'visit_date' ? 'created_at' : 'visit_date')}
+              className="flex items-center gap-2 px-6 py-2 bg-natural-50 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all hover:bg-natural-100"
+            >
+              <Calendar className="w-4 h-4 text-natural-400" />
+              Urut: {sortBy === 'visit_date' ? 'Jadwal Visit' : 'Kapan Booking'}
+           </button>
+        </div>
+
+        <div className="grid gap-6">
+          {filteredBookings.length === 0 ? (
+            <div className="py-24 text-center bg-white border border-dashed border-natural-200 rounded-[32px]">
+              <AlertCircle className="w-12 h-12 text-natural-200 mx-auto mb-4" />
+              <p className="text-natural-400 italic font-serif">Tidak ada reservasi ditemukan.</p>
             </div>
+          ) : (
+            filteredBookings.map((booking) => (
+              <motion.div 
+                key={booking.id}
+                layout
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-white border border-natural-200 rounded-[32px] p-6 md:p-10 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-8 shadow-sm hover:shadow-xl transition-all"
+              >
+                <div className="flex-1 space-y-6">
+                  <div className="flex items-center gap-4">
+                    <span className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-[0.2em] ${
+                      booking.status === 'confirmed' ? 'bg-green-100 text-green-700' :
+                      booking.status === 'cancelled' ? 'bg-red-100 text-red-700' :
+                      'bg-yellow-100 text-yellow-700'
+                    }`}>
+                      {booking.status === 'pending' ? 'Menunggu' : booking.status === 'confirmed' ? 'Dikonfirmasi' : 'Dibatalkan'}
+                    </span>
+                    <span className="text-natural-300 font-mono text-[10px] uppercase tracking-tighter">ID: {booking.id?.slice(-8).toUpperCase()}</span>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    <div>
+                      <h3 className="text-2xl font-serif font-bold text-natural-900 mb-2">{booking.name}</h3>
+                      <div className="flex flex-col gap-1">
+                        <p className="text-sm text-natural-500">{booking.email}</p>
+                        <p className="text-sm text-natural-900 font-bold">{booking.phone}</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-natural-50 p-6 rounded-3xl border border-natural-100">
+                      <div className="flex items-center gap-3 mb-3">
+                        <Calendar className="w-5 h-5 text-natural-700" />
+                        <span className="text-lg font-serif font-bold text-natural-900">{booking.date}</span>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-3">
+                          <Clock className="w-5 h-5 text-natural-400" />
+                          <span className="text-sm font-bold text-natural-700 uppercase tracking-widest">{booking.time} — {booking.endTime || addHours(booking.time, 5)} WIB</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col justify-center">
+                      <div className="flex items-center gap-4 mb-2">
+                         <div className="w-10 h-10 bg-natural-900 text-white rounded-xl flex items-center justify-center font-serif font-bold">
+                            {booking.tableId}
+                         </div>
+                         <div>
+                            <p className="text-[10px] uppercase font-bold text-natural-400 tracking-widest">Pilihan Meja</p>
+                            <p className="text-sm font-bold text-natural-900">{booking.guests} Tamu</p>
+                         </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pre-order Summary Section */}
+                  {booking.preOrderItems && booking.preOrderItems.length > 0 && (
+                    <div className="bg-natural-50 p-6 rounded-3xl border border-natural-100">
+                       <p className="text-[9px] uppercase font-bold text-natural-400 tracking-widest mb-4 flex items-center gap-2">
+                          <Coffee className="w-3.5 h-3.5" /> Daftar Pesanan Menu
+                       </p>
+                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                          {booking.preOrderItems.map((item, idx) => (
+                            <div key={idx} className="bg-white px-4 py-2 rounded-2xl border border-natural-200 flex justify-between items-center">
+                               <span className="text-xs text-natural-900 font-serif lowercase italic"><span className="font-bold font-sans not-italic mr-1">{item.quantity}x</span> {item.name}</span>
+                            </div>
+                          ))}
+                       </div>
+                       <div className="mt-4 pt-4 border-t border-natural-200/50 flex justify-end">
+                          <p className="text-sm font-bold text-natural-900">Total: Rp {booking.preOrderItems.reduce((s, i) => s + (i.price * i.quantity), 0).toLocaleString()}</p>
+                       </div>
+                    </div>
+                  )}
+                  
+                  <div className="pt-4 border-t border-natural-100 flex items-center gap-2 text-[10px] uppercase font-bold text-natural-300 tracking-[0.2em]">
+                     Dipesan pada {booking.createdAt ? new Date(booking.createdAt.toDate()).toLocaleString() : 'N/A'}
+                  </div>
+                </div>
+
+                <div className="flex lg:flex-col items-center gap-3 w-full lg:w-auto border-t lg:border-t-0 lg:border-l border-natural-100 pt-6 lg:pt-0 lg:pl-10">
+                  {booking.status === 'pending' ? (
+                    <>
+                      <button 
+                        onClick={() => updateStatus(booking.id!, 'confirmed')}
+                        className="flex-1 lg:w-32 p-4 bg-natural-700 text-natural-50 rounded-2xl hover:bg-natural-800 shadow-xl shadow-natural-700/20 transition-all flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-widest"
+                      >
+                        <Check className="w-4 h-4" /> Terima
+                      </button>
+                      <button 
+                        onClick={() => updateStatus(booking.id!, 'cancelled')}
+                        className="flex-1 lg:w-32 p-4 border border-natural-200 text-natural-400 rounded-2xl hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-all flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-widest"
+                      >
+                        <X className="w-4 h-4" /> Tolak
+                      </button>
+                    </>
+                  ) : (
+                    <div className="flex-1 lg:w-32 flex items-center justify-center py-4">
+                       <span className={`text-[10px] uppercase font-bold tracking-widest italic ${booking.status === 'confirmed' ? 'text-green-500' : 'text-red-300'}`}>
+                         {booking.status === 'confirmed' ? 'Sudah Diterima' : 'Dibatalkan'}
+                       </span>
+                    </div>
+                  )}
+                  <button 
+                    onClick={() => deleteBooking(booking.id!)}
+                    className="p-4 text-natural-200 hover:text-red-500 transition-colors"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                </div>
+              </motion.div>
+            ))
           )}
         </div>
       </div>
@@ -632,15 +883,15 @@ const BookingModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => voi
       const requestedStartTime = formData.time;
       const requestedEndTime = addHours(requestedStartTime, 5);
 
-      // Check availability for chosen date
+      // Check availability for chosen date using PUBLIC collection
       const q = query(
-        collection(db, 'bookings'), 
+        collection(db, 'public_bookings'), 
         where('date', '==', formData.date),
         where('status', 'in', ['pending', 'confirmed'])
       );
       
       const querySnapshot = await getDocs(q);
-      const existingBookings = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Booking));
+      const existingBookings = querySnapshot.docs.map(doc => doc.data() as any);
       
       // Filter for overlapping bookings
       const occupied = existingBookings
@@ -656,7 +907,7 @@ const BookingModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => voi
       setOccupiedTables(occupied);
       setStep('table');
     } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, 'bookings');
+      handleFirestoreError(error, OperationType.LIST, 'public_bookings');
       setStep('form');
     }
   };
@@ -666,14 +917,28 @@ const BookingModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => voi
     setStep('loading');
     
     try {
-      const path = 'bookings';
-      await addDoc(collection(db, path), {
+      const endTime = addHours(formData.time, 5);
+      const bookingData = {
         ...formData,
-        endTime: addHours(formData.time, 5),
+        endTime,
         status: 'pending',
         createdAt: serverTimestamp(),
         userId: auth.currentUser?.uid || null
+      };
+
+      const bookingRef = await addDoc(collection(db, 'bookings'), bookingData);
+      
+      sendBookingEmail(bookingData, 'new');
+
+      // Write to public availability collection
+      await setDoc(doc(db, 'public_bookings', bookingRef.id), {
+        date: formData.date,
+        time: formData.time,
+        endTime,
+        tableId: formData.tableId,
+        status: 'pending'
       });
+
       setStep('success');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'bookings');
@@ -892,7 +1157,7 @@ export default function App() {
   }, []);
 
   const menuItems: MenuItem[] = [
-    { id: '1', name: 'Signature Latte', price: 45000, description: 'Double shot espresso with creamy textured milk and a hint of vanilla.', category: 'coffee', image: 'https://www.aeki-aice.org/wp-content/uploads/2025/07/Coffee-Signature-Menu.webp' },
+    { id: '1', name: 'Signature Latte', price: 45000, description: 'Double shot espresso with creamy textured milk and a hint of vanilla.', category: 'coffee', image: '/src/assets/images/regenerated_image_1778467258301.png' },
     { id: '2', name: 'Almond Croissant', price: 38000, description: 'Buttery, flaky pastry filled with house-made almond frangipane.', category: 'pastry', image: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?q=80&w=800&auto=format&fit=crop' },
     { id: '3', name: 'Matcha Zen', price: 42000, description: 'Ceremonial grade Uji matcha with steamed oat milk.', category: 'tea', image: 'https://images.unsplash.com/photo-1515823064-d6e0c04616a7?q=80&w=800&auto=format&fit=crop' },
     { id: '4', name: 'Cold Brew Citrus', price: 48000, description: '18-hour cold steeped coffee with fresh orange zest.', category: 'coffee', image: 'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?q=80&w=800&auto=format&fit=crop' },

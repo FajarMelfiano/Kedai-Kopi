@@ -20,4 +20,10 @@ export interface Booking {
   status: 'pending' | 'confirmed' | 'cancelled';
   createdAt: any;
   userId?: string | null;
+  preOrderItems?: {
+    itemId: string;
+    name: string;
+    quantity: number;
+    price: number;
+  }[];
 }

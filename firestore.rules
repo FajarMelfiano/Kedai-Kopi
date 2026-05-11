@@ -39,7 +39,12 @@ service cloud.firestore {
         && data.guests is number && data.guests > 0 && data.guests <= 20
         && data.tableId is string && data.tableId.size() <= 20
         && data.status in ['pending', 'confirmed', 'cancelled']
-        && data.createdAt == request.time;
+        && data.createdAt == request.time
+        && (!('preOrderItems' in data) || data.preOrderItems is list);
+    }
+
+    function isOwner(data) {
+      return isSignedIn() && (data.email == request.auth.token.email || data.userId == request.auth.uid);
     }
 
     // Bookings
@@ -49,17 +54,37 @@ service cloud.firestore {
         && (incoming().get('userId', null) == null || incoming().userId == request.auth.uid)
       );
       
-      allow read: if isAdmin() || (isSignedIn() && (
-        resource.data.email == request.auth.token.email || 
-        resource.data.userId == request.auth.uid
-      ));
+      allow read: if isAdmin() || isOwner(resource.data);
       
-      allow update: if isAdmin() && (
+      allow update: if (isAdmin() && (
         incoming().status in ['pending', 'confirmed', 'cancelled']
         && incoming().diff(existing()).affectedKeys().hasOnly(['status'])
+      )) || (
+        isOwner(resource.data) && existing().status == 'confirmed'
+        && incoming().diff(existing()).affectedKeys().hasOnly(['preOrderItems'])
+        && incoming().preOrderItems is list
       );
 
       allow delete: if isAdmin();
+    }
+
+    // Public Booking Data (Availability Only)
+    match /public_bookings/{bookingId} {
+      // Anyone can check availability for a date
+      allow read, list: if true; 
+      
+      // Mirroring booking creation
+      allow create: if (
+        incoming().keys().hasAll(['date', 'time', 'endTime', 'tableId', 'status'])
+        && incoming().date is string
+        && incoming().time is string
+        && incoming().endTime is string
+        && incoming().tableId is string
+        && incoming().status == 'pending'
+      );
+
+      // Only Admin can update/delete status in sync with main collection
+      allow update, delete: if isAdmin();
     }
 
     // Menu

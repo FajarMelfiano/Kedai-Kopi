@@ -14,9 +14,35 @@
         "guests": { "type": "integer", "description": "Number of guests" },
         "tableId": { "type": "string", "description": "Selected table identifier" },
         "status": { "type": "string", "enum": ["pending", "confirmed", "cancelled"], "description": "Booking status" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "userId": { "type": "string", "description": "User identifier" },
+        "preOrderItems": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "itemId": { "type": "string" },
+              "name": { "type": "string" },
+              "quantity": { "type": "integer" },
+              "price": { "type": "number" }
+            }
+          }
+        }
       },
       "required": ["name", "email", "date", "time", "guests"]
+    },
+    "public_booking": {
+      "title": "Public Booking",
+      "description": "Public booking data for availability checks",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "endTime": { "type": "string" },
+        "tableId": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["date", "time", "tableId", "status"]
     },
     "menuItem": {
       "title": "Menu Item",
@@ -36,6 +62,10 @@
     "bookings": {
       "schema": "booking",
       "description": "Collection of table reservations"
+    },
+    "public_bookings": {
+      "schema": "public_booking",
+      "description": "Collection of reduced booking data for availability"
     },
     "menu": {
       "schema": "menuItem",
