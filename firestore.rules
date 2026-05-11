@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email == 'orioon700@gmail.com' && request.auth.token.email_verified == true;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Validation Blueprint for Bookings
+    function isValidBooking(data) {
+      return data.keys().hasAll(['name', 'email', 'phone', 'date', 'time', 'endTime', 'guests', 'tableId', 'status', 'createdAt'])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.email is string && data.email.size() <= 100
+        && data.phone is string && data.phone.size() <= 20
+        && data.date is string && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.time is string && data.time.matches('^\\d{2}:\\d{2}$')
+        && data.endTime is string && data.endTime.matches('^\\d{2}:\\d{2}$')
+        && data.guests is number && data.guests > 0 && data.guests <= 20
+        && data.tableId is string && data.tableId.size() <= 20
+        && data.status in ['pending', 'confirmed', 'cancelled']
+        && data.createdAt == request.time;
+    }
+
+    // Bookings
+    match /bookings/{bookingId} {
+      allow create: if isAdmin() || (
+        isValidId(bookingId) && isValidBooking(incoming())
+        && (incoming().get('userId', null) == null || incoming().userId == request.auth.uid)
+      );
+      
+      allow read: if isAdmin() || (isSignedIn() && (
+        resource.data.email == request.auth.token.email || 
+        resource.data.userId == request.auth.uid
+      ));
+      
+      allow update: if isAdmin() && (
+        incoming().status in ['pending', 'confirmed', 'cancelled']
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status'])
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // Menu
+    match /menu/{itemId} {
+      allow read: if true;
+      allow write: if false; // System/Admin managed
+    }
+  }
+}
